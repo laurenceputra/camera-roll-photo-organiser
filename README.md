@@ -106,6 +106,60 @@ Notes and caveats:
 - The script is intentionally conservative (copy-by-default) so you can verify
 	results before deleting or moving originals.
 
+
+## HEIC converter (`src/convert_to_heic.py`)
+
+This repository includes a helper script to convert legacy JPEG/PNG images to HEIC:
+
+- Path: `src/convert_to_heic.py`
+- Purpose: Convert common image formats (.jpg, .jpeg, .png, .tiff) to HEIC while
+	preserving the source file's modification time (mtime). The script is conservative
+	and will not delete originals unless `--delete-original` is specified.
+
+Key features and flags:
+
+- `--src` / `--dst`: source directory and destination directory
+- `--quality`: HEIC quality (0-100, default 90)
+- `--dry-run`: show planned actions without writing files
+- `--overwrite`: overwrite existing targets in the destination
+- `--delete-original`: remove original files after successful conversion
+- `--preserve-ctime`: best-effort attempt to preserve creation time on Windows
+- `--verbose` / `-v`: enable debug logging
+
+Dependencies and fallbacks:
+
+- Preferred: `pillow-heif` (and `Pillow`) for direct in-process encoding.
+- If `pillow-heif` cannot write (API differences or missing native libs), the
+	script will try a sequence of fallbacks:
+	1. Use `pillow_heif.from_pillow()` if available
+	2. Use `pillow_heif.write_heif()` if available
+	3. Fall back to `ffmpeg` (if installed) and encode using `libx265`/HEVC
+
+If neither pillow-heif nor ffmpeg are available or working, the script reports
+clear diagnostic messages so you can install the missing pieces.
+
+Example usage:
+
+```bash
+# dry-run
+python src/convert_to_heic.py --src /path/to/photos --dst /path/to/heic_out --dry-run
+
+# actual run with overwrite
+python src/convert_to_heic.py --src /path/to/photos --dst /path/to/heic_out --overwrite
+
+# convert and delete originals (use with caution)
+python src/convert_to_heic.py --src /path/to/photos --dst /path/to/heic_out --delete-original
+```
+
+Notes:
+
+- On Linux you may need to install system packages for `pillow-heif` (libheif,
+	libde265) or install `ffmpeg` + libx265 to use the ffmpeg fallback.
+- On macOS, the system's native encoders (VideoToolbox) may offer faster hardware
+	encoding; you can adapt the `_convert_with_ffmpeg` helper to use `-c:v hevc_videotoolbox`.
+- The conversion process may be CPU and disk I/O intensive for large collections.
+	Consider running on a machine with sufficient free disk space and CPU.
+
 ## Development / Contributing
 
 Contributions welcome.
