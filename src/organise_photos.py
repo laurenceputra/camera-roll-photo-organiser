@@ -20,55 +20,49 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import logging
 import os
 import shutil
-import sys
-import time
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import exifread
-import io
 from PIL import Image, UnidentifiedImageError
-import contextlib
-import os
-import functools
-def _suppress_c_stderr_cm():
-    @contextlib.contextmanager
-    def _cm():
+@contextlib.contextmanager
+def _suppress_c_stderr():
+    """Context manager to suppress C-level stderr output (e.g. from native libraries)."""
+    try:
+        devnull_fd = os.open(os.devnull, os.O_RDWR)
+        old_stderr_fd = os.dup(2)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+        yield
+    finally:
         try:
-            devnull_fd = os.open(os.devnull, os.O_RDWR)
-            old_stderr_fd = os.dup(2)
-            os.dup2(devnull_fd, 2)
-            os.close(devnull_fd)
-            yield
-        finally:
-            try:
-                os.dup2(old_stderr_fd, 2)
-                os.close(old_stderr_fd)
-            except Exception:
-                pass
-    return _cm()
+            os.dup2(old_stderr_fd, 2)
+            os.close(old_stderr_fd)
+        except Exception:
+            pass
 
 # Try importing pillow_heif but silence any native library stderr during import/registration
 HEIF_AVAILABLE = False
 try:
-    with _suppress_c_stderr_cm():
+    with _suppress_c_stderr():
         import pillow_heif
         pillow_heif.register_heif_opener()
     HEIF_AVAILABLE = True
 except Exception:
     HEIF_AVAILABLE = False
 
-from geopy import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
-from geopy.distance import distance as geopy_distance
-from tqdm import tqdm
 import csv
+from geopy import Nominatim
+from geopy.distance import distance as geopy_distance
+from geopy.extra.rate_limiter import RateLimiter
+from tqdm import tqdm
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.heic', '.heif', '.mp4', '.mov'}
 
@@ -94,7 +88,7 @@ def is_image_file(path: Path) -> bool:
 
 
 def find_files(src: Path):
-    for root, dirs, files in os.walk(src):
+    for root, _dirs, files in os.walk(src):
         for f in files:
             p = Path(root) / f
             if is_image_file(p):
@@ -129,21 +123,6 @@ def extract_exif_date_and_gps(path: Path, use_heif: bool = True) -> Tuple[dateti
                 # Some underlying libheif implementations print errors directly to C stderr
                 # (e.g. "File format not recognized.") even when Python raises OSError. To
                 # avoid that noisy output during scans, temporarily redirect fd=2 to /dev/null.
-                @contextlib.contextmanager
-                def _suppress_c_stderr():
-                    try:
-                        devnull_fd = os.open(os.devnull, os.O_RDWR)
-                        old_stderr_fd = os.dup(2)
-                        os.dup2(devnull_fd, 2)
-                        os.close(devnull_fd)
-                        yield
-                    finally:
-                        try:
-                            os.dup2(old_stderr_fd, 2)
-                            os.close(old_stderr_fd)
-                        except Exception:
-                            pass
-
                 with _suppress_c_stderr():
                     img = Image.open(path)
             except (UnidentifiedImageError, OSError):
@@ -354,9 +333,7 @@ def run():
         logging.info('No image files found under %s', src)
         return
 
-    planned: Dict[Path, Path] = {}
     errors = []
-
     records = []
     for path in tqdm(files, desc='Scanning files'):
         try:
