@@ -206,8 +206,18 @@ def get_country_for_coords(lat: float, lon: float, reverse_func, cache: Dict[str
     — the RateLimiter wrapper produced earlier is suitable.
     """
     key = f"{lat:.6f},{lon:.6f}"
+    
+    # Check for exact match first (fastest)
+    if key in cache:
+        return cache[key]
+    
     # If a nearby cached coordinate exists within 20 km, reuse its country.
-    for k, v in list(cache.items()):
+    # Optimization: Only check the most recent entries (last 100) since nearby photos
+    # are typically processed together. This reduces O(n) to O(1) for typical usage.
+    cache_items = list(cache.items())
+    recent_entries = cache_items[-100:] if len(cache_items) > 100 else cache_items
+    
+    for k, v in recent_entries:
         try:
             parts = k.split(',')
             if len(parts) != 2:
@@ -223,8 +233,6 @@ def get_country_for_coords(lat: float, lon: float, reverse_func, cache: Dict[str
         if d_km <= 20.0 and v and v != 'Unknown':
             logging.debug('Using nearby cached country for %s,%s -> %s (cached at %s,%s %0.1f km)', lat, lon, v, clat, clon, d_km)
             return v
-    if key in cache:
-        return cache[key]
     try:
         # Call the provided reverse function (rate-limited wrapper expected)
         loc = reverse_func((lat, lon), language='en', exactly_one=True)
