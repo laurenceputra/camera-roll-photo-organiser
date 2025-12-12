@@ -66,6 +66,10 @@ from tqdm import tqdm
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.heic', '.heif', '.mp4', '.mov'}
 
+# Maximum number of recent cache entries to check for proximity matching.
+# Nearby photos are typically processed together, so recent entries are most relevant.
+MAX_CACHE_PROXIMITY_ENTRIES = 100
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='Organise photos into Year/Month[/Country] folders')
@@ -212,10 +216,10 @@ def get_country_for_coords(lat: float, lon: float, reverse_func, cache: Dict[str
         return cache[key]
     
     # If a nearby cached coordinate exists within 20 km, reuse its country.
-    # Optimization: Only check the most recent entries (last 100) since nearby photos
+    # Optimization: Only check the most recent entries since nearby photos
     # are typically processed together. This reduces O(n) to O(1) for typical usage.
     cache_items = list(cache.items())
-    recent_entries = cache_items[-100:] if len(cache_items) > 100 else cache_items
+    recent_entries = cache_items[-MAX_CACHE_PROXIMITY_ENTRIES:] if len(cache_items) > MAX_CACHE_PROXIMITY_ENTRIES else cache_items
     
     for k, v in recent_entries:
         try:
