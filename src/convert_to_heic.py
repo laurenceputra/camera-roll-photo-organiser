@@ -25,13 +25,12 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import sys
-from pathlib import Path
-from tqdm import tqdm
-from datetime import datetime
-from typing import Tuple
-import subprocess
 import shutil
+import subprocess
+from pathlib import Path
+from typing import Tuple
+
+from tqdm import tqdm
 
 try:
     import pillow_heif
@@ -68,7 +67,7 @@ def is_source_image(p: Path) -> bool:
 
 
 def find_images(src: Path):
-    for root, dirs, files in os.walk(src):
+    for root, _dirs, files in os.walk(src):
         for f in files:
             p = Path(root) / f
             if is_source_image(p):
@@ -164,14 +163,9 @@ def convert_image_to_heic(src_path: Path, dst_path: Path, quality: int) -> Tuple
             # If PIL save fails, attempt to use pillow_heif.write_heif as a fallback
             logging.debug('PIL HEIC save failed, trying pillow_heif.write_heif fallback: %s', e)
             try:
-                # Convert PIL image to raw bytes (RGB/RGBA) and call pillow_heif
-                mode = img.mode
-                arr = img.tobytes()
-                size = img.size
                 # pillow_heif expects data in a specific mode; prefer RGB
-                if mode not in ('RGB', 'RGBA'):
+                if img.mode not in ('RGB', 'RGBA'):
                     img = img.convert('RGB')
-                    mode = 'RGB'
                 # Use pillow_heif to write directly
                 # First try pillow_heif API if it exposes a helper
                 try:
