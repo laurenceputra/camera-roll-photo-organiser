@@ -31,33 +31,6 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import exifread
-from PIL import Image, UnidentifiedImageError
-@contextlib.contextmanager
-def _suppress_c_stderr():
-    """Context manager to suppress C-level stderr output (e.g. from native libraries)."""
-    try:
-        devnull_fd = os.open(os.devnull, os.O_RDWR)
-        old_stderr_fd = os.dup(2)
-        os.dup2(devnull_fd, 2)
-        os.close(devnull_fd)
-        yield
-    finally:
-        try:
-            os.dup2(old_stderr_fd, 2)
-            os.close(old_stderr_fd)
-        except Exception:
-            pass
-
-# Try importing pillow_heif but silence any native library stderr during import/registration
-HEIF_AVAILABLE = False
-try:
-    with _suppress_c_stderr():
-        import pillow_heif
-        pillow_heif.register_heif_opener()
-    HEIF_AVAILABLE = True
-except Exception:
-    HEIF_AVAILABLE = False
-
 import csv
 from geopy import Nominatim
 from geopy.distance import distance as geopy_distance
@@ -78,7 +51,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--two-level', action='store_true', help='Only create Year/Month (skip country level)')
     p.add_argument('--report-only', action='store_true', help='Do not copy/move; write CSV report of planned operations')
     p.add_argument('--report-file', type=Path, help='Path to CSV report file (default: <dst>/report.csv)')
-    p.add_argument('--no-heif', action='store_true', help='Disable using pillow-heif and force raw fallback for HEIC/HEIF files')
     p.add_argument('--move', action='store_true', help='Move files instead of copying (default: copy)')
     p.add_argument('--preserve-ctime', action='store_true', help='Attempt to preserve creation time (platform-dependent; Windows supported)')
     p.add_argument('--dry-run', action='store_true', help='Print actions but do not copy/move')
@@ -113,47 +85,14 @@ def _dms_to_decimal(dms, ref) -> Optional[float]:
         return None
 
 
-def extract_exif_date_and_gps(path: Path, use_heif: bool = True) -> Tuple[datetime, Optional[Tuple[float, float]]]:
+def extract_exif_date_and_gps(path: Path) -> Tuple[datetime, Optional[Tuple[float, float]]]:
     """Return (datetime, (lat, lon)|None). Date may be from EXIF or file mtime.
-    Supports HEIC/HEIF via pillow-heif if available.
+    Uses raw EXIF reading for all file types including HEIC/HEIF.
     """
     tags = {}
     try:
-        suffix = path.suffix.lower()
-        if suffix in ('.heic', '.heif') and HEIF_AVAILABLE and use_heif:
-            # Use Pillow opener for HEIF and extract EXIF bytes if present.
-            # If PIL cannot identify the file, fall back to safe binary read so we don't print noisy errors.
-            try:
-                # Some underlying libheif implementations print errors directly to C stderr
-                # (e.g. "File format not recognized.") even when Python raises OSError. To
-                # avoid that noisy output during scans, temporarily redirect fd=2 to /dev/null.
-                with _suppress_c_stderr():
-                    img = Image.open(path)
-            except (UnidentifiedImageError, OSError):
-                # Fallback: try to read raw bytes with exifread (may yield no tags)
-                try:
-                    logging.debug('Pillow failed to open HEIC; falling back to raw byte EXIF read: %s', path)
-                    with open(path, 'rb') as fh:
-                        tags = exifread.process_file(fh, details=False, stop_tag='GPS GPSLongitude')
-                except Exception:
-                    tags = {}
-            else:
-                try:
-                    exif_bytes = img.info.get('exif')
-                    if exif_bytes:
-                        buf = io.BytesIO(exif_bytes)
-                        tags = exifread.process_file(buf, details=False, stop_tag='GPS GPSLongitude')
-                    else:
-                        # Save a JPEG copy to memory and run exifread on it
-                        buf = io.BytesIO()
-                        img.save(buf, format='JPEG')
-                        buf.seek(0)
-                        tags = exifread.process_file(buf, details=False, stop_tag='GPS GPSLongitude')
-                except Exception:
-                    tags = {}
-        else:
-            with open(path, 'rb') as fh:
-                tags = exifread.process_file(fh, details=False, stop_tag='GPS GPSLongitude')
+        with open(path, 'rb') as fh:
+            tags = exifread.process_file(fh, details=False, stop_tag='GPS GPSLongitude')
     except Exception:
         tags = {}
     # Date
@@ -349,7 +288,7 @@ def run():
     records = []
     for path in tqdm(files, desc='Scanning files'):
         try:
-            date, gps = extract_exif_date_and_gps(path, use_heif=(not args.no_heif))
+            date, gps = extract_exif_date_and_gps(path)
             year = f"{date.year:04d}"
             month_num = f"{date.month:02d}"
             if args.two_level:
